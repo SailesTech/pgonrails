@@ -13,17 +13,17 @@ serve(async (req) => {
 
   try {
     console.log('google-oauth-callback: Request received');
-    
+
     // Get parameters from URL (Google redirects with query params)
     const url = new URL(req.url);
     const code = url.searchParams.get('code');
     const state = url.searchParams.get('state');
     const error = url.searchParams.get('error');
 
-    console.log('google-oauth-callback: Params:', { 
-      hasCode: !!code, 
-      hasState: !!state, 
-      error 
+    console.log('google-oauth-callback: Params:', {
+      hasCode: !!code,
+      hasState: !!state,
+      error
     });
 
     if (error) {
@@ -44,19 +44,31 @@ serve(async (req) => {
     // Parse state to get user info and services
     let stateData;
     try {
-      stateData = JSON.parse(atob(state));
+      // Helper to decode URL-safe base64
+      const decodeBase64Url = (str: string) => {
+        // Replace URL-safe characters
+        str = str.replace(/-/g, '+').replace(/_/g, '/');
+        // Add padding if needed
+        while (str.length % 4) {
+          str += '=';
+        }
+        return atob(str);
+      };
+
+      console.log('google-oauth-callback: Raw state:', state);
+      stateData = JSON.parse(decodeBase64Url(state));
     } catch (e) {
       console.error('google-oauth-callback: Failed to parse state:', e);
       throw new Error('Invalid state parameter');
     }
-    
+
     const { userId, organizationId, services, scopes } = stateData;
     console.log('google-oauth-callback: Parsed state:', { userId, organizationId, services });
 
     // Check for required env vars
     const clientId = Deno.env.get('GOOGLE_CLIENT_ID');
     const clientSecret = Deno.env.get('GOOGLE_CLIENT_SECRET');
-    
+
     if (!clientId || !clientSecret) {
       console.error('google-oauth-callback: Missing Google credentials');
       throw new Error('Google OAuth not configured. Please add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET secrets.');
@@ -84,9 +96,9 @@ serve(async (req) => {
 
     const tokens = await tokenResponse.json();
     const { access_token, refresh_token, expires_in, scope } = tokens;
-    
+
     console.log('google-oauth-callback: Tokens received, expires_in:', expires_in);
-    
+
     // Use actual granted scopes from Google
     const grantedScopes = scope ? scope.split(' ') : scopes;
 
@@ -221,7 +233,7 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('google-oauth-callback: Error:', error);
-    
+
     // Return HTML with error that closes the popup
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     const html = `
@@ -277,7 +289,7 @@ serve(async (req) => {
         </body>
       </html>
     `;
-    
+
     return new Response(html, {
       headers: { 'Content-Type': 'text/html' },
       status: 500,
