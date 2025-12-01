@@ -63,12 +63,19 @@ serve(async (req) => {
     ].join(' ');
 
     // Create state with user info
-    const state = btoa(JSON.stringify({
+    // Use URL-safe base64 encoding to avoid issues with special characters
+    const stateJson = JSON.stringify({
       userId: user.id,
       organizationId: userRole.organization_id,
       services,
       scopes,
-    }));
+    });
+    // Convert to base64 and make it URL-safe by replacing + with - and / with _
+    // Also remove padding = as it can cause issues in URLs
+    const state = btoa(stateJson)
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
 
     // Build OAuth URL
     const clientId = Deno.env.get('GOOGLE_CLIENT_ID');

@@ -42,11 +42,66 @@ serve(async (req) => {
     }
 
     // Parse state to get user info and services
+    // Handle multiple formats for backward compatibility:
+    // 1. JWT token (header.payload.signature) - used by some providers
+    // 2. URL-encoded base64
+    // 3. Plain base64
+    // 4. URL-safe base64 (with - and _ instead of + and /)
     let stateData;
     try {
-      stateData = JSON.parse(atob(state));
+      // First, try URL-decoding the state (Google may URL-encode it)
+      let decodedState = state;
+      try {
+        decodedState = decodeURIComponent(state);
+      } catch {
+        // State wasn't URL-encoded, use as-is
+      }
+      
+      console.log('google-oauth-callback: Raw state value:', decodedState.substring(0, 50) + '...');
+      
+      // Check if state is a JWT token (has 3 parts separated by dots)
+      const jwtParts = decodedState.split('.');
+      if (jwtParts.length === 3) {
+        console.log('google-oauth-callback: Detected JWT format, extracting payload');
+        // JWT format: header.payload.signature
+        // We need to decode the payload (middle part)
+        let payload = jwtParts[1];
+        
+        // JWT uses URL-safe base64, convert to standard base64
+        payload = payload.replace(/-/g, '+').replace(/_/g, '/');
+        
+        // Add padding if needed
+        const padding = payload.length % 4;
+        if (padding) {
+          payload += '='.repeat(4 - padding);
+        }
+        
+        const jsonString = atob(payload);
+        stateData = JSON.parse(jsonString);
+        console.log('google-oauth-callback: JWT payload decoded successfully');
+      } else {
+        // Not a JWT, try as regular base64
+        console.log('google-oauth-callback: Treating as regular base64');
+        
+        // Convert URL-safe base64 to standard base64 if needed
+        let base64State = decodedState
+          .replace(/-/g, '+')
+          .replace(/_/g, '/');
+        
+        // Add padding if missing (base64 should be divisible by 4)
+        const padding = base64State.length % 4;
+        if (padding) {
+          base64State += '='.repeat(4 - padding);
+        }
+        
+        const jsonString = atob(base64State);
+        stateData = JSON.parse(jsonString);
+      }
+      
+      console.log('google-oauth-callback: State decoded, keys:', Object.keys(stateData));
     } catch (e) {
       console.error('google-oauth-callback: Failed to parse state:', e);
+      console.error('google-oauth-callback: Full raw state value:', state);
       throw new Error('Invalid state parameter');
     }
     
