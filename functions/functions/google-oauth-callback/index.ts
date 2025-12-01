@@ -6,30 +6,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Helper to check if state is a JWT (from Supabase Auth)
-const isJwt = (str: string): boolean => {
-  const parts = str.split('.');
-  return parts.length === 3;
-};
-
-// Helper to decode URL-safe base64
-const decodeBase64Url = (str: string): string => {
-  // Replace URL-safe characters
-  str = str.replace(/-/g, '+').replace(/_/g, '/');
-  // Add padding if needed
-  while (str.length % 4) {
-    str += '=';
-  }
-  return atob(str);
-};
-
-// Helper to parse JWT payload (without verification - GoTrue will verify)
-const parseJwtPayload = (jwt: string): Record<string, unknown> => {
-  const parts = jwt.split('.');
-  if (parts.length !== 3) throw new Error('Invalid JWT format');
-  return JSON.parse(decodeBase64Url(parts[1]));
-};
-
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -37,106 +13,26 @@ serve(async (req) => {
 
   try {
     console.log('google-oauth-callback: Request received');
-
+    
     // Get parameters from URL (Google redirects with query params)
     const url = new URL(req.url);
     const code = url.searchParams.get('code');
     const state = url.searchParams.get('state');
     const error = url.searchParams.get('error');
 
-    console.log('google-oauth-callback: Params:', {
-      hasCode: !!code,
-      hasState: !!state,
-      error
+    console.log('google-oauth-callback: Params:', { 
+      hasCode: !!code, 
+      hasState: !!state, 
+      error 
     });
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-
-    // Check if this is a Supabase Auth OAuth callback (state is JWT)
-    if (state && isJwt(state)) {
-      console.log('google-oauth-callback: Detected Supabase Auth OAuth flow (JWT state)');
-      
-      // Parse JWT to get site_url for redirect
-      let siteUrl: string;
-      try {
-        const jwtPayload = parseJwtPayload(state);
-        siteUrl = (jwtPayload.site_url as string) || supabaseUrl;
-        console.log('google-oauth-callback: Parsed JWT, site_url:', siteUrl);
-      } catch (e) {
-        console.error('google-oauth-callback: Failed to parse JWT:', e);
-        siteUrl = supabaseUrl;
-      }
-
-      if (error) {
-        console.error('google-oauth-callback: OAuth error from Google:', error);
-        return new Response(null, {
-          status: 302,
-          headers: {
-            'Location': `${siteUrl}?error=${encodeURIComponent(error)}&error_description=${encodeURIComponent('OAuth authentication failed')}`,
-          },
-        });
-      }
-
-      if (!code) {
-        return new Response(null, {
-          status: 302,
-          headers: {
-            'Location': `${siteUrl}?error=missing_code&error_description=${encodeURIComponent('Authorization code missing')}`,
-          },
-        });
-      }
-
-      // For Supabase Auth flow, we need to call GoTrue's token endpoint
-      // GoTrue will exchange the code and create/update the user
-      console.log('google-oauth-callback: Calling GoTrue token endpoint');
-      
-      const gotrueResponse = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=pkce`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': Deno.env.get('SUPABASE_ANON_KEY')!,
-        },
-        body: JSON.stringify({
-          auth_code: code,
-          code_verifier: state, // GoTrue uses state as code_verifier for OAuth
-        }),
-      });
-
-      // If PKCE flow doesn't work, try the callback approach
-      if (!gotrueResponse.ok) {
-        console.log('google-oauth-callback: PKCE flow failed, redirecting to GoTrue callback');
-        const queryString = url.search;
-        return new Response(null, {
-          status: 302,
-          headers: {
-            'Location': `${supabaseUrl}/auth/v1/callback${queryString}`,
-          },
-        });
-      }
-
-      const tokens = await gotrueResponse.json();
-      console.log('google-oauth-callback: Got tokens from GoTrue');
-
-      // Redirect to site with tokens in hash fragment (standard Supabase behavior)
-      const redirectUrl = new URL(siteUrl);
-      redirectUrl.hash = `access_token=${tokens.access_token}&refresh_token=${tokens.refresh_token}&token_type=${tokens.token_type}&expires_in=${tokens.expires_in}`;
-      
-      return new Response(null, {
-        status: 302,
-        headers: {
-          'Location': redirectUrl.toString(),
-        },
-      });
-    }
-
-    // ========== Custom OAuth Flow (for Google integrations like Gmail/Calendar/Drive) ==========
-    
     if (error) {
       console.error('google-oauth-callback: OAuth error from Google:', error);
+      // Redirect to app with error
       return new Response(null, {
         status: 302,
         headers: {
-          'Location': `${supabaseUrl}/auth/callback?error=${encodeURIComponent(error)}`,
+          'Location': `${Deno.env.get('SUPABASE_URL')}/auth/callback?error=${encodeURIComponent(error)}`,
         },
       });
     }
@@ -145,23 +41,22 @@ serve(async (req) => {
       throw new Error('Missing authorization code or state');
     }
 
-    // Parse state to get user info and services (custom OAuth flow)
+    // Parse state to get user info and services
     let stateData;
     try {
-      console.log('google-oauth-callback: Raw state:', state);
-      stateData = JSON.parse(decodeBase64Url(state));
+      stateData = JSON.parse(atob(state));
     } catch (e) {
       console.error('google-oauth-callback: Failed to parse state:', e);
       throw new Error('Invalid state parameter');
     }
-
+    
     const { userId, organizationId, services, scopes } = stateData;
     console.log('google-oauth-callback: Parsed state:', { userId, organizationId, services });
 
     // Check for required env vars
     const clientId = Deno.env.get('GOOGLE_CLIENT_ID');
     const clientSecret = Deno.env.get('GOOGLE_CLIENT_SECRET');
-
+    
     if (!clientId || !clientSecret) {
       console.error('google-oauth-callback: Missing Google credentials');
       throw new Error('Google OAuth not configured. Please add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET secrets.');
@@ -176,7 +71,7 @@ serve(async (req) => {
         code,
         client_id: clientId,
         client_secret: clientSecret,
-        redirect_uri: `${supabaseUrl}/functions/v1/google-oauth-callback`,
+        redirect_uri: `${Deno.env.get('SUPABASE_URL')}/functions/v1/google-oauth-callback`,
         grant_type: 'authorization_code',
       }),
     });
@@ -189,9 +84,9 @@ serve(async (req) => {
 
     const tokens = await tokenResponse.json();
     const { access_token, refresh_token, expires_in, scope } = tokens;
-
+    
     console.log('google-oauth-callback: Tokens received, expires_in:', expires_in);
-
+    
     // Use actual granted scopes from Google
     const grantedScopes = scope ? scope.split(' ') : scopes;
 
@@ -211,6 +106,7 @@ serve(async (req) => {
     console.log('google-oauth-callback: User info received:', userInfo.email);
 
     // Initialize Supabase admin client
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -325,7 +221,7 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('google-oauth-callback: Error:', error);
-
+    
     // Return HTML with error that closes the popup
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     const html = `
@@ -381,7 +277,7 @@ serve(async (req) => {
         </body>
       </html>
     `;
-
+    
     return new Response(html, {
       headers: { 'Content-Type': 'text/html' },
       status: 500,
