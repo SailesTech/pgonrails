@@ -43,10 +43,11 @@ serve(async (req) => {
 
     // Parse state to get user info and services
     // Handle multiple formats for backward compatibility:
-    // 1. JWT token (header.payload.signature) - used by some providers
-    // 2. URL-encoded base64
-    // 3. Plain base64
-    // 4. URL-safe base64 (with - and _ instead of + and /)
+    // 1. JWT token from GoTrue (Supabase Auth) - redirect to GoTrue callback
+    // 2. JWT token with our custom payload
+    // 3. URL-encoded base64
+    // 4. Plain base64
+    // 5. URL-safe base64 (with - and _ instead of + and /)
     let stateData;
     try {
       // First, try URL-decoding the state (Google may URL-encode it)
@@ -79,6 +80,25 @@ serve(async (req) => {
         const jsonString = atob(payload);
         stateData = JSON.parse(jsonString);
         console.log('google-oauth-callback: JWT payload decoded successfully');
+        console.log('google-oauth-callback: State decoded, keys:', Object.keys(stateData));
+        
+        // Check if this is a GoTrue JWT (has provider, site_url, flow_state_id)
+        // This means the OAuth was initiated by Supabase Auth, not our custom integration
+        if (stateData.provider && stateData.site_url && stateData.flow_state_id) {
+          console.log('google-oauth-callback: Detected GoTrue OAuth flow, redirecting to GoTrue callback');
+          
+          // Redirect to GoTrue's callback endpoint with original params
+          const gotrueCallbackUrl = new URL(`${Deno.env.get('SUPABASE_URL')}/auth/v1/callback`);
+          gotrueCallbackUrl.searchParams.set('code', code);
+          gotrueCallbackUrl.searchParams.set('state', state);
+          
+          return new Response(null, {
+            status: 302,
+            headers: {
+              'Location': gotrueCallbackUrl.toString(),
+            },
+          });
+        }
       } else {
         // Not a JWT, try as regular base64
         console.log('google-oauth-callback: Treating as regular base64');
@@ -96,13 +116,18 @@ serve(async (req) => {
         
         const jsonString = atob(base64State);
         stateData = JSON.parse(jsonString);
+        console.log('google-oauth-callback: State decoded, keys:', Object.keys(stateData));
       }
-      
-      console.log('google-oauth-callback: State decoded, keys:', Object.keys(stateData));
     } catch (e) {
       console.error('google-oauth-callback: Failed to parse state:', e);
       console.error('google-oauth-callback: Full raw state value:', state);
       throw new Error('Invalid state parameter');
+    }
+    
+    // Validate that we have our custom state data (not GoTrue)
+    if (!stateData.userId || !stateData.organizationId || !stateData.services) {
+      console.error('google-oauth-callback: Missing required state fields. Got keys:', Object.keys(stateData));
+      throw new Error('Invalid state: missing userId, organizationId, or services. This callback is for Google integrations, not authentication.');
     }
     
     const { userId, organizationId, services, scopes } = stateData;
