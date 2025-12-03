@@ -14,6 +14,44 @@ async function sha1(message: string): Promise<string> {
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// Livespace authentication helper - gets token and session
+async function getLivespaceAuth(domain: string, apiKey: string): Promise<{ token: string; sessionId: string }> {
+  const tokenUrl = `${domain}/api/public/json/_Api/auth_call/_api_method/getToken`;
+  
+  const formData = new FormData();
+  formData.append("_api_auth", "key");
+  formData.append("_api_key", apiKey);
+  
+  console.log("Getting Livespace token from:", tokenUrl);
+  
+  const response = await fetch(tokenUrl, {
+    method: "POST",
+    body: formData,
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Livespace getToken failed:", response.status, errorText);
+    throw new Error(`Livespace getToken failed (${response.status}): ${errorText}`);
+  }
+  
+  const data = await response.json();
+  console.log("Livespace getToken response:", JSON.stringify(data));
+  
+  if (data.status === false) {
+    throw new Error(`Livespace getToken error: code ${data.result}. Check your API key.`);
+  }
+  
+  if (!data.result?.token || !data.result?.session_id) {
+    throw new Error("Livespace getToken: missing token or session_id in response");
+  }
+  
+  return {
+    token: data.result.token,
+    sessionId: data.result.session_id,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -91,27 +129,34 @@ Deno.serve(async (req) => {
     });
     if (decryptSecretError || !apiSecret) throw new Error("Failed to decrypt API secret");
 
-    // Build Livespace API URL
-    // domain should be full URL like "https://mojafirma.livespace.io"
-    const baseUrl = cred.domain.replace(/\/$/, "");
-    const url = `${baseUrl}/api/public/json/${module}/${method}`;
+    // Step 1: Get token and session
+    const { token, sessionId } = await getLivespaceAuth(cred.domain, apiKey);
 
-    // Generate signature: SHA1(API_KEY + API_SECRET + JSON_PARAMS)
-    const paramsJson = JSON.stringify(params);
-    const signatureData = apiKey + apiSecret + paramsJson;
+    // Step 2: Calculate signature: SHA1(api_key + token + api_secret)
+    const signatureData = apiKey + token + apiSecret;
     const signature = await sha1(signatureData);
 
-    console.log("Livespace API call", { module, method, url, paramsJson });
+    console.log("Livespace proxy auth - token length:", token.length, "session:", sessionId);
 
-    // Make request to Livespace
-    const lsRes = await fetch(url, {
+    // Step 3: Make authenticated request
+    const apiUrl = `${cred.domain}/api/public/json/${module}/${method}`;
+    
+    const formData = new FormData();
+    formData.append("_api_auth", "key");
+    formData.append("_api_key", apiKey);
+    formData.append("_api_sha", signature);
+    formData.append("_api_session", sessionId);
+    
+    // Add method params
+    for (const [key, value] of Object.entries(params)) {
+      formData.append(key, typeof value === "string" ? value : JSON.stringify(value));
+    }
+
+    console.log("Livespace API call", { module, method, url: apiUrl });
+
+    const lsRes = await fetch(apiUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Api-Key": apiKey,
-        "X-Api-Signature": signature,
-      },
-      body: paramsJson,
+      body: formData,
     });
 
     const responseText = await lsRes.text();

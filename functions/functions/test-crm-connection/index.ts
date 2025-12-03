@@ -14,6 +14,99 @@ async function sha1(message: string): Promise<string> {
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// Livespace authentication helper - gets token and session
+async function getLivespaceAuth(domain: string, apiKey: string): Promise<{ token: string; sessionId: string }> {
+  const tokenUrl = `${domain}/api/public/json/_Api/auth_call/_api_method/getToken`;
+  
+  const formData = new FormData();
+  formData.append("_api_auth", "key");
+  formData.append("_api_key", apiKey);
+  
+  console.log("Getting Livespace token from:", tokenUrl);
+  
+  const response = await fetch(tokenUrl, {
+    method: "POST",
+    body: formData,
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Livespace getToken failed:", response.status, errorText);
+    throw new Error(`Livespace getToken failed (${response.status}): ${errorText}`);
+  }
+  
+  const data = await response.json();
+  console.log("Livespace getToken response:", JSON.stringify(data));
+  
+  if (data.status === false) {
+    throw new Error(`Livespace getToken error: code ${data.result}. Check your API key.`);
+  }
+  
+  if (!data.result?.token || !data.result?.session_id) {
+    throw new Error("Livespace getToken: missing token or session_id in response");
+  }
+  
+  return {
+    token: data.result.token,
+    sessionId: data.result.session_id,
+  };
+}
+
+// Make authenticated Livespace API call
+async function callLivespaceApi(
+  domain: string,
+  apiKey: string,
+  apiSecret: string,
+  module: string,
+  method: string,
+  params: Record<string, unknown> = {}
+): Promise<unknown> {
+  // Step 1: Get token and session
+  const { token, sessionId } = await getLivespaceAuth(domain, apiKey);
+  
+  // Step 2: Calculate signature: SHA1(api_key + token + api_secret)
+  const signatureData = apiKey + token + apiSecret;
+  const signature = await sha1(signatureData);
+  
+  console.log("Livespace auth - token length:", token.length, "session:", sessionId);
+  
+  // Step 3: Make authenticated request
+  const apiUrl = `${domain}/api/public/json/${module}/${method}`;
+  
+  const formData = new FormData();
+  formData.append("_api_auth", "key");
+  formData.append("_api_key", apiKey);
+  formData.append("_api_sha", signature);
+  formData.append("_api_session", sessionId);
+  
+  // Add method params
+  for (const [key, value] of Object.entries(params)) {
+    formData.append(key, typeof value === "string" ? value : JSON.stringify(value));
+  }
+  
+  console.log("Calling Livespace API:", apiUrl);
+  
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    body: formData,
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Livespace API call failed:", response.status, errorText);
+    throw new Error(`Livespace API error (${response.status}): ${errorText}`);
+  }
+  
+  const data = await response.json();
+  console.log("Livespace API response:", JSON.stringify(data).substring(0, 500));
+  
+  if (data.status === false) {
+    throw new Error(`Livespace API error: code ${data.result}`);
+  }
+  
+  return data;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -118,42 +211,16 @@ Deno.serve(async (req) => {
         throw new Error("Failed to decrypt API secret");
       }
 
-      // Test Livespace connection via User_getInfo
-      const testUrl = `${credentials.domain}/api/public/json/Default/User_getInfo`;
-      const paramsJson = JSON.stringify({});
-      const signatureData = apiKey + apiSecret + paramsJson;
-      const signature = await sha1(signatureData);
+      console.log("Testing Livespace connection for domain:", credentials.domain);
 
-      console.log("Testing Livespace connection...", testUrl);
-      console.log("API Key length:", apiKey?.length, "API Secret length:", apiSecret?.length);
-      console.log("Signature data length:", signatureData?.length, "Signature:", signature);
-
-      const response = await fetch(testUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Api-Key": apiKey,
-          "X-Api-Signature": signature,
-        },
-        body: paramsJson,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Livespace API error (${response.status}): ${errorText}`);
-      }
-
-      const data = await response.json();
-      console.log("Livespace test response:", JSON.stringify(data));
-      
-      if (data.error) {
-        throw new Error(`Livespace API error: ${data.error.message || JSON.stringify(data.error)}`);
-      }
-      
-      // Check for status: false (authentication or other errors)
-      if (data.status === false) {
-        throw new Error(`Livespace API error: code ${data.result}. Check API credentials (api_key, api_secret, domain).`);
-      }
+      // Test Livespace connection via User_getInfo with proper auth flow
+      const data = await callLivespaceApi(
+        credentials.domain,
+        apiKey,
+        apiSecret,
+        "Default",
+        "User_getInfo"
+      ) as { result?: { email?: string; name?: string } };
 
       return new Response(
         JSON.stringify({
