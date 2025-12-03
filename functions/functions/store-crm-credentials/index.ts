@@ -90,9 +90,17 @@ Deno.serve(async (req) => {
       }
 
       const verifyData = await verifyRes.json();
+      console.log("Livespace verification response:", JSON.stringify(verifyData));
+      
       if (verifyData.error) {
         console.error("Livespace API error:", verifyData.error);
         throw new Error(`Livespace API error: ${verifyData.error.message || JSON.stringify(verifyData.error)}`);
+      }
+      
+      // Check for status: false (authentication or API errors)
+      if (verifyData.status === false) {
+        console.error("Livespace verification failed with code:", verifyData.result);
+        throw new Error(`Livespace API error: code ${verifyData.result}. Check API credentials (api_key, api_secret, domain).`);
       }
 
       console.log("Livespace verification successful, user:", verifyData.result?.email);
