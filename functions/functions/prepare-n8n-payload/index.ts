@@ -121,18 +121,32 @@ serve(async (req) => {
     console.log('prepare-n8n-payload: Loaded', allMeetingTypes?.length || 0, 'meeting types');
 
     // 1c. Fetch Pipedrive scenarios for all meeting types
-    const { data: scenarios, error: scenariosError } = await supabase
+    const { data: pipedriveScenarios, error: pipedriveError } = await supabase
       .from('pipedrive_scenarios')
       .select('meeting_type_id, pipeline_id, stage_id, deal_status, order_index')
       .eq('organization_id', meeting.organization_id)
       .eq('is_active', true)
       .order('order_index');
 
-    if (scenariosError) {
-      console.warn('prepare-n8n-payload: Error loading scenarios:', scenariosError);
+    if (pipedriveError) {
+      console.warn('prepare-n8n-payload: Error loading Pipedrive scenarios:', pipedriveError);
     }
 
-    console.log('prepare-n8n-payload: Loaded', scenarios?.length || 0, 'Pipedrive scenarios');
+    console.log('prepare-n8n-payload: Loaded', pipedriveScenarios?.length || 0, 'Pipedrive scenarios');
+
+    // 1c2. Fetch Livespace scenarios for all meeting types
+    const { data: livespaceScenarios, error: livespaceError } = await supabase
+      .from('livespace_scenarios')
+      .select('meeting_type_id, process_id, stage_id, deal_status, order_index')
+      .eq('organization_id', meeting.organization_id)
+      .eq('is_active', true)
+      .order('order_index');
+
+    if (livespaceError) {
+      console.warn('prepare-n8n-payload: Error loading Livespace scenarios:', livespaceError);
+    }
+
+    console.log('prepare-n8n-payload: Loaded', livespaceScenarios?.length || 0, 'Livespace scenarios');
 
     // 1d. Map scenarios to meeting types
     const meetingTypesWithScenarios = (allMeetingTypes || []).map((mt: any) => ({
@@ -151,10 +165,18 @@ serve(async (req) => {
       criteria_strings: (mt.meeting_type_criteria_strings || [])
         .sort((a: any, b: any) => a.order_index - b.order_index)
         .map((c: any) => c.criterion_text),
-      pipedrive_scenarios: (scenarios || [])
+      pipedrive_scenarios: (pipedriveScenarios || [])
         .filter((s: any) => s.meeting_type_id === mt.id)
         .map((s: any) => ({
           pipeline_id: s.pipeline_id,
+          stage_id: s.stage_id,
+          deal_status: s.deal_status,
+          order_index: s.order_index,
+        })),
+      livespace_scenarios: (livespaceScenarios || [])
+        .filter((s: any) => s.meeting_type_id === mt.id)
+        .map((s: any) => ({
+          process_id: s.process_id,
           stage_id: s.stage_id,
           deal_status: s.deal_status,
           order_index: s.order_index,
@@ -177,37 +199,64 @@ serve(async (req) => {
     // 3. Prepare integrations object
     const integrations: any = {};
 
-    // 3a. Get Pipedrive credentials if CRM integration exists
+    // 3a. Get CRM integration (Pipedrive or Livespace)
     const { data: crmIntegration } = await supabase
       .from('crm_integrations')
       .select(`
         id,
         platform,
         crm_credentials (
-          api_key_encrypted
+          api_key_encrypted,
+          api_secret_encrypted,
+          domain
         )
       `)
       .eq('organization_id', meeting.organization_id)
       .eq('status', 'connected')
-      .eq('platform', 'pipedrive')
       .maybeSingle();
 
     if (crmIntegration && crmIntegration.crm_credentials) {
-      console.log('prepare-n8n-payload: Found Pipedrive integration');
+      const credentials = crmIntegration.crm_credentials as any;
+      
+      if (crmIntegration.platform === 'pipedrive') {
+        console.log('prepare-n8n-payload: Found Pipedrive integration');
 
-      // Decrypt Pipedrive API key
-      const { data: apiKey, error: decryptError } = await supabase.rpc('decrypt_api_key', {
-        p_encrypted_key: (crmIntegration.crm_credentials as any).api_key_encrypted,
-      });
+        // Decrypt Pipedrive API key
+        const { data: apiKey, error: decryptError } = await supabase.rpc('decrypt_api_key', {
+          p_encrypted_key: credentials.api_key_encrypted,
+        });
 
-      if (!decryptError && apiKey) {
-        integrations.pipedrive = {
-          api_key: apiKey,
-          deal_id: meeting.webhook_metadata?.deal_id || null,
-        };
-        console.log('prepare-n8n-payload: Pipedrive API key decrypted');
-      } else {
-        console.warn('prepare-n8n-payload: Failed to decrypt Pipedrive API key');
+        if (!decryptError && apiKey) {
+          integrations.pipedrive = {
+            api_key: apiKey,
+            deal_id: meeting.webhook_metadata?.deal_id || null,
+          };
+          console.log('prepare-n8n-payload: Pipedrive API key decrypted');
+        } else {
+          console.warn('prepare-n8n-payload: Failed to decrypt Pipedrive API key');
+        }
+      } else if (crmIntegration.platform === 'livespace') {
+        console.log('prepare-n8n-payload: Found Livespace integration');
+
+        // Decrypt Livespace API key and secret
+        const { data: apiKey, error: keyError } = await supabase.rpc('decrypt_api_key', {
+          p_encrypted_key: credentials.api_key_encrypted,
+        });
+        const { data: apiSecret, error: secretError } = await supabase.rpc('decrypt_api_key', {
+          p_encrypted_key: credentials.api_secret_encrypted,
+        });
+
+        if (!keyError && !secretError && apiKey && apiSecret) {
+          integrations.livespace = {
+            api_key: apiKey,
+            api_secret: apiSecret,
+            domain: credentials.domain,
+            deal_id: meeting.webhook_metadata?.deal_id || null,
+          };
+          console.log('prepare-n8n-payload: Livespace credentials decrypted');
+        } else {
+          console.warn('prepare-n8n-payload: Failed to decrypt Livespace credentials');
+        }
       }
     }
 
