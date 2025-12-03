@@ -42,13 +42,13 @@ async function getLivespaceAuth(domain: string, apiKey: string): Promise<{ token
     throw new Error(`Livespace getToken error: code ${data.result}`);
   }
   
-  if (!data.result?.token || !data.result?.session_id) {
+  if (!data.data?.token || !data.data?.session_id) {
     throw new Error("Livespace getToken: missing token or session_id in response");
   }
   
   return {
-    token: data.result.token,
-    sessionId: data.result.session_id,
+    token: data.data.token,
+    sessionId: data.data.session_id,
   };
 }
 
