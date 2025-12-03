@@ -72,6 +72,8 @@ Deno.serve(async (req) => {
       const signature = await sha1(signatureData);
 
       console.log("Verifying Livespace connection...", verifyUrl);
+      console.log("API Key length:", api_key?.length, "API Secret length:", api_secret?.length);
+      console.log("Signature data length:", signatureData?.length, "Signature:", signature);
 
       const verifyRes = await fetch(verifyUrl, {
         method: "POST",
