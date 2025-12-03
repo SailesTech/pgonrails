@@ -142,8 +142,15 @@ Deno.serve(async (req) => {
       }
 
       const data = await response.json();
+      console.log("Livespace test response:", JSON.stringify(data));
+      
       if (data.error) {
         throw new Error(`Livespace API error: ${data.error.message || JSON.stringify(data.error)}`);
+      }
+      
+      // Check for status: false (authentication or other errors)
+      if (data.status === false) {
+        throw new Error(`Livespace API error: code ${data.result}. Check API credentials (api_key, api_secret, domain).`);
       }
 
       return new Response(
