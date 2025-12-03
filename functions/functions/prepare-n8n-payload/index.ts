@@ -70,7 +70,7 @@ serve(async (req) => {
     // Fetch user profile separately
     const { data: userProfile } = await supabase
       .from('profiles')
-      .select('id, email, first_name, last_name')
+      .select('id, email, first_name, last_name, email_signature')
       .eq('id', meeting.user_id)
       .single();
 
@@ -452,6 +452,7 @@ serve(async (req) => {
         id: meeting.user_id,
         email: userProfile?.email || null,
         full_name: userProfile ? `${userProfile.first_name || ''} ${userProfile.last_name || ''}`.trim() : null,
+        email_signature: userProfile?.email_signature || null,
       },
       organization_id: meeting.organization_id,
       organization_context: organizationContext || null,
