@@ -453,6 +453,13 @@ serve(async (req) => {
         email: userProfile?.email || null,
         full_name: userProfile ? `${userProfile.first_name || ''} ${userProfile.last_name || ''}`.trim() : null,
         email_signature: userProfile?.email_signature || null,
+        email_signature_html: userProfile?.email_signature 
+          ? userProfile.email_signature
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;')
+              .replace(/\n/g, '<br>')
+          : null,
       },
       organization_id: meeting.organization_id,
       organization_context: organizationContext || null,
