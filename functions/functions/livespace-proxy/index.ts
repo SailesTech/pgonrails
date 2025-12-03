@@ -101,7 +101,7 @@ Deno.serve(async (req) => {
     const signatureData = apiKey + apiSecret + paramsJson;
     const signature = await sha1(signatureData);
 
-    console.log("Livespace API call", { module, method, url });
+    console.log("Livespace API call", { module, method, url, paramsJson });
 
     // Make request to Livespace
     const lsRes = await fetch(url, {
@@ -115,6 +115,7 @@ Deno.serve(async (req) => {
     });
 
     const responseText = await lsRes.text();
+    console.log("Livespace API response", { status: lsRes.status, body: responseText.substring(0, 500) });
     
     if (!lsRes.ok) {
       console.error("Livespace error", lsRes.status, responseText);
@@ -140,12 +141,28 @@ Deno.serve(async (req) => {
     }
 
     // Livespace returns { result: ..., error: null } on success
+    // On error: { result: errorCode, status: false, error: {...} }
     if (responseData.error) {
       console.error("Livespace API returned error:", responseData.error);
       return new Response(
         JSON.stringify({
           error: responseData.error.message || "Livespace API error",
           code: responseData.error.code,
+        }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    // Check for status: false (authentication or other errors)
+    if (responseData.status === false) {
+      console.error("Livespace API status false:", responseData);
+      return new Response(
+        JSON.stringify({
+          error: `Livespace error code: ${responseData.result}. Check API credentials.`,
+          code: responseData.result,
         }),
         {
           status: 400,
