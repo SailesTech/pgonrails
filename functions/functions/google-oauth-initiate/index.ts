@@ -55,14 +55,14 @@ serve(async (req) => {
     }
 
     // Build scopes based on services
-    const scopeMap: Record<string, string> = {
-      gmail: 'https://www.googleapis.com/auth/gmail.send',
-      calendar: 'https://www.googleapis.com/auth/calendar',
-      drive: 'https://www.googleapis.com/auth/drive',
-      docs: 'https://www.googleapis.com/auth/documents',
+    const scopeMap: Record<string, string[]> = {
+      gmail: ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.compose'],
+      calendar: ['https://www.googleapis.com/auth/calendar'],
+      drive: ['https://www.googleapis.com/auth/drive'],
+      docs: ['https://www.googleapis.com/auth/documents'],
     };
 
-    const scopes = services.map((s: string) => scopeMap[s]).filter(Boolean);
+    const scopes = services.flatMap((s: string) => scopeMap[s] || []);
     const scopeString = [
       'https://www.googleapis.com/auth/userinfo.email',
       'https://www.googleapis.com/auth/userinfo.profile',
