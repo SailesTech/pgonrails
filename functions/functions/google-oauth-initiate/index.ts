@@ -58,7 +58,7 @@ serve(async (req) => {
     const scopeMap: Record<string, string> = {
       gmail: 'https://www.googleapis.com/auth/gmail.send',
       calendar: 'https://www.googleapis.com/auth/calendar',
-      drive: 'https://www.googleapis.com/auth/drive.file',
+      drive: 'https://www.googleapis.com/auth/drive',
       docs: 'https://www.googleapis.com/auth/documents',
     };
 
