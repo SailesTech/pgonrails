@@ -59,6 +59,7 @@ serve(async (req) => {
       gmail: 'https://www.googleapis.com/auth/gmail.send',
       calendar: 'https://www.googleapis.com/auth/calendar',
       drive: 'https://www.googleapis.com/auth/drive.file',
+      docs: 'https://www.googleapis.com/auth/documents',
     };
 
     const scopes = services.map((s: string) => scopeMap[s]).filter(Boolean);

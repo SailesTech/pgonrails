@@ -145,6 +145,7 @@ serve(async (req) => {
         gmail_enabled: services.includes('gmail'),
         calendar_enabled: services.includes('calendar'),
         drive_enabled: services.includes('drive'),
+        docs_enabled: services.includes('docs'),
         access_token_encrypted: encryptedAccess,
         refresh_token_encrypted: encryptedRefresh,
         token_expires_at: expiresAt,
