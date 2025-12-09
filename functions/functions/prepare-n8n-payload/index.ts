@@ -156,6 +156,16 @@ serve(async (req) => {
       .eq('organization_id', meeting.organization_id)
       .maybeSingle();
 
+    // 1e. Fetch user's CRM preferences (user mapping to CRM user)
+    const { data: userCrmPrefs } = await supabase
+      .from('user_crm_preferences')
+      .select('crm_user_id, crm_user_name, auto_sync_enabled')
+      .eq('user_id', meeting.user_id)
+      .eq('organization_id', meeting.organization_id)
+      .maybeSingle();
+
+    console.log('prepare-n8n-payload: User CRM prefs:', userCrmPrefs ? 'found' : 'not found');
+
     // Determine user's default: preference or fallback to first available
     const userDefaultMeetingTypeId = userMeetingPref?.default_meeting_type_id 
       || (allMeetingTypes && allMeetingTypes.length > 0 ? allMeetingTypes[0].id : null);
@@ -475,6 +485,10 @@ serve(async (req) => {
               .replace(/>/g, '&gt;')
               .replace(/\n/g, '<br>')
           : null,
+        // CRM user mapping
+        crm_user_id: userCrmPrefs?.crm_user_id || null,
+        crm_user_name: userCrmPrefs?.crm_user_name || null,
+        crm_auto_sync: userCrmPrefs?.auto_sync_enabled ?? true,
       },
       organization_id: meeting.organization_id,
       organization_context: organizationContext || null,
