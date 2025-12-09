@@ -18,15 +18,17 @@ async function sha1(message: string): Promise<string> {
 async function getLivespaceAuth(domain: string, apiKey: string): Promise<{ token: string; sessionId: string }> {
   const tokenUrl = `${domain}/api/public/json/_Api/auth_call/_api_method/getToken`;
   
-  const formData = new FormData();
-  formData.append("_api_auth", "key");
-  formData.append("_api_key", apiKey);
+  // Use URL-encoded format matching n8n implementation
+  const bodyString = `_api_auth=key&_api_key=${encodeURIComponent(apiKey)}`;
   
   console.log("Getting Livespace token from:", tokenUrl);
   
   const response = await fetch(tokenUrl, {
     method: "POST",
-    body: formData,
+    body: bodyString,
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
   });
   
   if (!response.ok) {
@@ -139,24 +141,29 @@ Deno.serve(async (req) => {
     console.log("Livespace proxy auth - token length:", token.length, "session:", sessionId);
 
     // Step 3: Make authenticated request
-    const apiUrl = `${cred.domain}/api/public/json/${module}/${method}`;
+    // Use URL format: Default/${module}_${method} (e.g., Default/User_getList)
+    const apiUrl = `${cred.domain}/api/public/json/Default/${module}_${method}`;
     
-    const formData = new FormData();
-    formData.append("_api_auth", "key");
-    formData.append("_api_key", apiKey);
-    formData.append("_api_sha", signature);
-    formData.append("_api_session", sessionId);
+    // Build payload as JSON with auth params (matching n8n implementation)
+    const payload = {
+      _api_auth: "key",
+      _api_key: apiKey,
+      _api_sha: signature,
+      _api_session: sessionId,
+      ...params,
+    };
     
-    // Add method params
-    for (const [key, value] of Object.entries(params)) {
-      formData.append(key, typeof value === "string" ? value : JSON.stringify(value));
-    }
+    // Send as URL-encoded 'data=' parameter
+    const bodyString = "data=" + encodeURIComponent(JSON.stringify(payload));
 
     console.log("Livespace API call", { module, method, url: apiUrl });
 
     const lsRes = await fetch(apiUrl, {
       method: "POST",
-      body: formData,
+      body: bodyString,
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
     });
 
     const responseText = await lsRes.text();
