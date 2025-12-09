@@ -36,8 +36,9 @@ Deno.serve(async (req) => {
 
     console.log("Validating Telnyx API key for user:", userId);
 
-    // Validate API key with Telnyx API
-    const telnyxResponse = await fetch("https://api.telnyx.com/v2/phone_numbers", {
+    // Validate API key with Telnyx API using /v2/balance endpoint
+    // This endpoint works for any valid API key without requiring specific resources
+    const telnyxResponse = await fetch("https://api.telnyx.com/v2/balance", {
       method: "GET",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -45,7 +46,11 @@ Deno.serve(async (req) => {
       },
     });
 
+    console.log("Telnyx validation response status:", telnyxResponse.status);
+
     if (!telnyxResponse.ok) {
+      const errorBody = await telnyxResponse.text();
+      console.error("Telnyx API validation failed:", telnyxResponse.status, errorBody);
       throw new Error("Invalid Telnyx API key. Please check your key and try again.");
     }
 
