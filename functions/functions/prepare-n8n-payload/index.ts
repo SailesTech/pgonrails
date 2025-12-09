@@ -148,12 +148,27 @@ serve(async (req) => {
 
     console.log('prepare-n8n-payload: Loaded', livespaceScenarios?.length || 0, 'Livespace scenarios');
 
-    // 1d. Map scenarios to meeting types
+    // 1d. Fetch user's default meeting type preference
+    const { data: userMeetingPref } = await supabase
+      .from('user_meeting_preferences')
+      .select('default_meeting_type_id')
+      .eq('user_id', meeting.user_id)
+      .eq('organization_id', meeting.organization_id)
+      .maybeSingle();
+
+    // Determine user's default: preference or fallback to first available
+    const userDefaultMeetingTypeId = userMeetingPref?.default_meeting_type_id 
+      || (allMeetingTypes && allMeetingTypes.length > 0 ? allMeetingTypes[0].id : null);
+
+    console.log('prepare-n8n-payload: User default meeting type:', userDefaultMeetingTypeId);
+
+    // 1e. Map scenarios to meeting types with per-user is_default
     const meetingTypesWithScenarios = (allMeetingTypes || []).map((mt: any) => ({
       id: mt.id,
       name: mt.name,
       description: mt.description,
-      is_default: mt.is_default,
+      // Per-user is_default based on user preference, NOT org-level is_default
+      is_default: mt.id === userDefaultMeetingTypeId,
       script_guidelines: mt.script_guidelines,
       success_criteria: mt.success_criteria,
       attributes: (mt.meeting_type_attributes || [])
@@ -183,7 +198,7 @@ serve(async (req) => {
         })),
     }));
 
-    console.log('prepare-n8n-payload: Meeting types with scenarios prepared');
+    console.log('prepare-n8n-payload: Meeting types with scenarios prepared (per-user default)');
 
     // 2. Generate callback token (secure random)
     const callbackToken = crypto.randomUUID() + '-' + Date.now();
