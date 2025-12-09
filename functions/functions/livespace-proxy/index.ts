@@ -89,7 +89,7 @@ Deno.serve(async (req) => {
     if (integrationError || !integration) throw new Error("Integration not found");
     if (integration.platform !== "livespace") throw new Error("Integration is not Livespace");
 
-    // Permission check: super admin OR org owner/admin
+    // Permission check: super admin OR any org member
     let allowed = false;
     const { data: isSuperAdmin } = await adminClient.rpc("is_super_admin", { _user_id: user.id });
     if (isSuperAdmin === true) {
@@ -101,7 +101,8 @@ Deno.serve(async (req) => {
         .eq("user_id", user.id)
         .eq("organization_id", integration.organization_id)
         .maybeSingle();
-      if (role && ["owner", "admin"].includes(role.role)) allowed = true;
+      // Allow any organization member to fetch CRM data (read-only operation)
+      if (role) allowed = true;
     }
     if (!allowed) {
       return new Response(JSON.stringify({ error: "Forbidden" }), {
